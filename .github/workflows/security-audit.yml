@@ -74,10 +74,13 @@ jobs:
         run: |
           set +e
           nix develop --command cargo deny check --config .config/deny.toml advisories \
-            > "$REPORT" 2>&1
-          EXIT_CODE=$?
-          cat "$REPORT"
-          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+            2>&1 | tee "$REPORT"
+          PIPE_STATUSES=("${PIPESTATUS[@]}")
+          # A failed report write is an infrastructure error, not an advisory.
+          if (( PIPE_STATUSES[1] != 0 )); then
+            exit "${PIPE_STATUSES[1]}"
+          fi
+          echo "exit_code=${PIPE_STATUSES[0]}" >> "$GITHUB_OUTPUT"
           exit 0
         env:
           # The report goes to a file, not a step output: it is passed to the
