@@ -42,3 +42,20 @@ jobs:
             -color \
             -ignore '^specifying action "\$/[^"@]+" in invalid format because ref is missing\.' \
             .github/workflows/*.yml
+
+  select-dev-revision:
+    name: select-dev-revision tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      # Standard library only; the tests build throwaway git histories and
+      # fake the GitHub API, so they need neither Nix nor network access.
+      - name: Run tests
+        run: python3 -m unittest discover -s .github/actions/select-dev-revision -p 'test_*.py' -v

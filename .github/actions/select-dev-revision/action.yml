@@ -1,0 +1,42 @@
+# Selects the CI-verified main commit a coalesced dev Publish run builds.
+# See select_revision.py for the selection rules and why each one exists.
+#
+# Selection only: the caller keeps its concurrency group, job `if:` fences,
+# credentials, environments and publish destinations. The caller must check
+# out its own repository with full history first (actions/checkout with
+# `fetch-depth: 0`); credentials need not persist, since main is fetched
+# anonymously from `origin`.
+name: "Select Dev Revision"
+description: "Pick the newest trusted CI-verified main commit for a dev publish triggered by CI."
+
+inputs:
+  trigger-run-id:
+    description: "`github.event.workflow_run.id` of the triggering CI run."
+    required: true
+  trigger-head-sha:
+    description: "`github.event.workflow_run.head_sha` of the triggering CI run."
+    required: true
+  github-token:
+    description: "Token with `actions: read` for the run lookups."
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  publish:
+    description: "`true` to publish `sha`, `false` when the trigger left main or is too far behind."
+    value: ${{ steps.select.outputs.publish }}
+  sha:
+    description: "Full SHA of the selected commit."
+    value: ${{ steps.select.outputs.sha }}
+
+runs:
+  using: composite
+  steps:
+    - name: Select revision
+      id: select
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        TRIGGER_RUN_ID: ${{ inputs.trigger-run-id }}
+        TRIGGER_HEAD_SHA: ${{ inputs.trigger-head-sha }}
+      run: python3 "${GITHUB_ACTION_PATH}/select_revision.py"

@@ -18,6 +18,7 @@ Pinning is by full commit SHA, with a trailing version comment that matches the 
 | [`commit-and-pr`](.github/actions/commit-and-pr/action.yml) | Stage, commit, push, and open a PR with `dependencies` + `on-hold` labels and a `hold-until: YYYY-MM-DD` body marker. Each run gets its own dated branch and PR; earlier runs' PRs stay open. |
 | [`scan-pins`](.github/actions/scan-pins/action.yml) | Discover SHA-pinned `uses:` references across workflows and composite-action manifests, as JSON. Scans the working directory, or any remote ref via the API without a checkout. |
 | [`verify-pins`](.github/actions/verify-pins/action.yml) | Check scanned pins for re-pointed upstream tags and published security advisories. |
+| [`select-dev-revision`](.github/actions/select-dev-revision/action.yml) | For a dev publish triggered by main CI, pick the newest trusted CI-verified main commit, so a late-finishing older CI cannot overwrite newer output. |
 
 Reference one from any workflow:
 
@@ -40,6 +41,45 @@ The trailing version comment is required — the `actions-update` workflow uses 
 Output `push-args` is empty unless both `signing-key` and `push-target` are set; pass it to `nix-fast-build` to push built paths back into the cache in the same step.
 
 The action does not install `nix-fast-build`. Add it to your flake's dev shell and invoke it through `nix develop -c`, so CI and local runs use the same locked version.
+
+### `select-dev-revision`
+
+For a `workflow_run` dev publish whose runs share one non-cancelling concurrency group (one running, newest pending). Pending runs are replaced in CI *completion* order, not commit order, so the surviving run can belong to an older commit. The action confirms the triggering CI run through the API, then selects the newest first-parent descendant on `main` with a successful trusted CI run. It falls back to the trigger itself when no such descendant exists. It also counts an earlier successful attempt when a rerun later failed or is still running.
+
+"Trusted" is fixed: the caller's `.github/workflows/ci.yml`, triggered by `push` or `workflow_dispatch` on `main` from the caller's own repository, and completed successfully. A fork, pull request, malformed input, truncated run list or any API error fails the step, so nothing is published.
+
+| Input | Default | Purpose |
+|---|---|---|
+| `trigger-run-id` | required | `github.event.workflow_run.id` |
+| `trigger-head-sha` | required | `github.event.workflow_run.head_sha` |
+| `github-token` | `github.token` | Needs `actions: read`. |
+
+Outputs: `publish` (`true`/`false`; `false` when the trigger is no longer on `main` or more than 30 newer commits lack green CI) and `sha` (the selected commit).
+
+Only selection is shared. The caller keeps the concurrency group, the job `if:` fences on the triggering event, its credentials and environments, and what it builds and publishes. Run the action in a job that holds no secrets, after a full-history checkout of the caller's repository, then check out `sha` in the publishing job:
+
+```yaml
+guard:
+  if: github.event.workflow_run.conclusion == 'success' && ...  # trusted dev trigger only
+  permissions:
+    actions: read
+    contents: read
+  outputs:
+    publish: ${{ steps.select.outputs.publish }}
+    sha: ${{ steps.select.outputs.sha }}
+  steps:
+    - uses: actions/checkout@<sha>  # vX.Y.Z
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+    - id: select
+      uses: arcuru/actions/.github/actions/select-dev-revision@<sha>  # vX.Y.Z
+      with:
+        trigger-run-id: ${{ github.event.workflow_run.id }}
+        trigger-head-sha: ${{ github.event.workflow_run.head_sha }}
+```
+
+The runner needs `python3` and `git`.
 
 ## Reusable workflows
 
